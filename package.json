@@ -1,7 +1,7 @@
 {
   "name": "zo-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for texting and emailing from agents running on your Zo Computer",
+  "version": "2.0.0",
+  "description": "Internal stdio MCP — full Zo tool catalog for terminal agents on your Zo Computer",
   "type": "module",
   "license": "MIT",
   "author": "Vihaan Shah",
@@ -18,9 +18,9 @@
     "zo-computer",
     "mcp",
     "model-context-protocol",
-    "sms",
     "claude-code",
-    "cursor"
+    "cursor",
+    "internal"
   ],
   "engines": {
     "node": ">=18"

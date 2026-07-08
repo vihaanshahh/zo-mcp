@@ -7,29 +7,35 @@ export interface ZoToolResult {
   execution_time_ms?: number;
 }
 
-function resolveAuthToken(): string {
-  const raw =
-    process.env.ZO_CLIENT_IDENTITY_TOKEN ??
-    process.env.ZO_ACCESS_TOKEN ??
-    process.env.ZO_API_KEY;
+export interface ZoToolDefinition {
+  name: string;
+  description: string | null;
+  display_name: string | null;
+  args_schema: Record<string, unknown> | null;
+}
 
-  if (!raw?.trim()) {
+function requireIdentityToken(): string {
+  const token = process.env.ZO_CLIENT_IDENTITY_TOKEN?.trim();
+  if (!token) {
     throw new Error(
-      "Missing auth token. Set ZO_CLIENT_IDENTITY_TOKEN (on your Zo) or ZO_ACCESS_TOKEN / ZO_API_KEY.",
+      "zo-mcp only runs on a Zo Computer. ZO_CLIENT_IDENTITY_TOKEN is not set.",
     );
   }
-
-  const token = raw.trim();
-  if (/^bearer\s+/i.test(token)) {
-    return token;
-  }
-
-  // Access tokens from Settings are zo_sk_*; the in-box identity token is a JWT.
-  if (token.startsWith("zo_sk_")) {
-    return `Bearer ${token}`;
-  }
-
   return token;
+}
+
+export async function fetchToolCatalog(): Promise<ZoToolDefinition[]> {
+  const response = await fetch(API_BASE, {
+    headers: { authorization: requireIdentityToken() },
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw new Error(`Failed to load Zo tools (${response.status}): ${bodyText}`);
+  }
+
+  const parsed = JSON.parse(bodyText) as { tools?: ZoToolDefinition[] };
+  return parsed.tools ?? [];
 }
 
 export async function runZoTool(
@@ -39,7 +45,7 @@ export async function runZoTool(
   const response = await fetch(`${API_BASE}/${toolName}/run`, {
     method: "POST",
     headers: {
-      authorization: resolveAuthToken(),
+      authorization: requireIdentityToken(),
       "content-type": "application/json",
     },
     body: JSON.stringify({ args }),
@@ -75,5 +81,5 @@ export function formatToolResult(result: ZoToolResult): string {
     return result.result;
   }
 
-  return JSON.stringify(result.result);
+  return JSON.stringify(result.result, null, 2);
 }

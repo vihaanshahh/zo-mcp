@@ -8,6 +8,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { ToolCatalog } from "./catalog.js";
 import { formatToolResult, runZoTool } from "./zo-tools.js";
 
 function readVersion(): string {
@@ -22,85 +23,56 @@ function readVersion(): string {
   }
 }
 
-const TOOLS = [
-  {
-    name: "send_sms_to_user",
-    description:
-      "Send an SMS to the Zo owner (or a registered contact). Calls Zo's internal send_sms_to_user tool directly — no /zo/ask session. Keep messages under 160 words.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        message: {
-          type: "string",
-          description: "Text body to send.",
-        },
-        contact_name: {
-          type: "string",
-          description:
-            "Optional registered contact name. Omit to text the Zo owner.",
-        },
-        media_files: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional absolute file paths to attach as MMS.",
-        },
-      },
-      required: ["message"],
-    },
-  },
-  {
-    name: "send_email_to_user",
-    description:
-      "Send an email to the Zo owner. Calls Zo's internal send_email_to_user tool directly — no /zo/ask session.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        subject: {
-          type: "string",
-          description: "Email subject line.",
-        },
-        markdown_body: {
-          type: "string",
-          description: "Email body in Markdown.",
-        },
-        attachments: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Optional absolute file paths to attach (max 10MB total).",
-        },
-      },
-      required: ["subject", "markdown_body"],
-    },
-  },
-] as const;
-
 async function main(): Promise<void> {
+  const catalog = new ToolCatalog();
+
+  try {
+    const tools = await catalog.refresh();
+    process.stderr.write(
+      `[zo-mcp] loaded ${tools.length} internal Zo tools\n`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[zo-mcp] startup failed: ${message}\n`);
+    process.exit(1);
+  }
+
   const server = new Server(
-    { name: "zo-mcp", version: readVersion() },
+    { name: "zo-internal-mcp", version: readVersion() },
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map((tool) => ({ ...tool })),
-  }));
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    try {
+      await catalog.refresh();
+    } catch (err) {
+      process.stderr.write(
+        `[zo-mcp] tool refresh failed: ${err instanceof Error ? err.message : err}\n`,
+      );
+    }
+    return { tools: catalog.list() };
+  });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
 
     try {
-      const payload = (args ?? {}) as Record<string, unknown>;
-
-      if (name === "send_sms_to_user" || name === "send_email_to_user") {
-        const text = formatToolResult(await runZoTool(name, payload));
+      if (!catalog.has(name)) {
         return {
-          content: [{ type: "text" as const, text }],
+          content: [
+            {
+              type: "text" as const,
+              text: `Unknown tool: ${name}. Run tools/list to see the current Zo catalog.`,
+            },
+          ],
+          isError: true,
         };
       }
 
+      const payload = (args ?? {}) as Record<string, unknown>;
+      const text = formatToolResult(await runZoTool(name, payload));
       return {
-        content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
-        isError: true,
+        content: [{ type: "text" as const, text }],
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
